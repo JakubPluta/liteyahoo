@@ -94,14 +94,39 @@ class Client:
         return quotes_df
 
     def fundamentals(self, element=None, proxy=None, **kwargs):
-
-
-        # financials
+        """
+        * Finance
+        """
         data = self._scrape_data_to_json(proxy, endpoint='/financials')
 
-        cf = data.get('cashflowStatementHistory')['cashflowStatements']
+        # CashFlow
+        cash_flow = data.get('cashflowStatementHistory')['cashflowStatements']
+        cash_flow_quarterly = data.get('cashflowStatementHistoryQuarterly')['cashflowStatements']
+        cash_flow_df = self._create_data_frame(cash_flow)
+        cash_flow_quarterly_df = self._create_data_frame(cash_flow_quarterly)
+        self._cash_flow = cash_flow_df
 
-        return cf
+        # Balance Sheet
+        balance_sheet = data.get('balanceSheetHistory')['balanceSheetStatements']
+        balance_sheet_quarterly = data.get('balanceSheetHistoryQuarterly')['balanceSheetStatements']
+        balance_sheet_df = self._create_data_frame(balance_sheet)
+        balance_sheet_quarterly_df = self._create_data_frame(balance_sheet_quarterly)
+        self._balance_sheet = balance_sheet_df
+
+        # Income Statement
+        income_statement = data.get('incomeStatementHistory')['incomeStatementHistory']
+        income_statement_quarterly = data.get('incomeStatementHistoryQuarterly')['incomeStatementHistory']
+        income_statement_df = self._create_data_frame(income_statement)
+        income_statement_quarterly_df = self._create_data_frame(income_statement_quarterly)
+        self._income_statement = income_statement_df
+
+    @staticmethod
+    def _create_data_frame(data):
+        df = pd.DataFrame(data).drop('maxAge',axis=1)
+        for col in df.columns:
+            df[col] = df[col].apply(lambda x: x.get('raw') if x not in [np.NaN, np.NAN, None, 'nan'] else None)
+        df['endDate'] = pd.to_datetime(df['endDate'],unit='s')
+        return df.set_index('endDate').T
 
     def _scrape_data_to_json(self, proxy, endpoint=""):
         if proxy: proxy = proxy_setter(proxy)
