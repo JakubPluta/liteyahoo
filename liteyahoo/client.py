@@ -6,11 +6,15 @@ import numpy as np
 import json
 import re
 from .utils import convert_to_timestamp, proxy_setter
+from json import JSONDecodeError
+import requests_cache
 
 
 class Client:
 
     URL = 'https://query1.finance.yahoo.com'
+    URL_TO_SCRAPE = 'https://finance.yahoo.com/quote'
+
     START_DATE = "1971-01-01"
 
     def __init__(self, symbol: str):
@@ -24,7 +28,6 @@ class Client:
         self._balance_sheet: json = None
         self._splits: pd.DataFrame() = None
         self._dividends: pd.DataFrame() = None
-
         self._financials: json = None
 
         self._sentiment: json = None
@@ -73,22 +76,69 @@ class Client:
         quotes['index'] = self.timestamp_converter(quotes['timestamp'])
 
         quotes_df = pd.DataFrame.from_dict(quotes).set_index('index').drop('timestamp',axis=1)
+        quotes_df.dropna(inplace=True)
         self._historical_prices = quotes_df[['open', 'high', 'low', 'close', 'volume']]
 
         if "events" in pre_quotes:
             if "dividends" in pre_quotes["events"]:
                 dividends_df = pd.DataFrame(list(pre_quotes['events']['dividends'].values()))
-                dividends_df['date'] = pd.to_datetime(dividends_df['date'],unit='s')
+                dividends_df['date'] = pd.to_datetime(dividends_df['date'], unit='s')
                 dividends_df.set_index('date', inplace=True)
-                self._dividends = dividends_df
 
             if 'splits' in pre_quotes["events"]:
                 splits_df = pd.DataFrame(list(pre_quotes['events']['splits'].values()))[['date','splitRatio']]
                 splits_df['date'] = pd.to_datetime(splits_df['date'], unit='s')
                 splits_df.set_index('date',inplace=True)
-                self._splits = splits_df
+                quotes_df = pd.concat([quotes_df,splits_df], axis=1, sort=True)
 
         return quotes_df
+
+    def fundamentals(self, element=None, proxy=None, **kwargs):
+
+
+        # financials
+        data = self._scrape_data_to_json(proxy, endpoint='/financials')
+
+        cf = data.get('cashflowStatementHistory')['cashflowStatements']
+
+        return cf
+
+    def _scrape_data_to_json(self, proxy, endpoint=""):
+        if proxy: proxy = proxy_setter(proxy)
+
+        url = f"{self.URL_TO_SCRAPE}/{self._symbol}" + endpoint
+        requests_cache.install_cache("yahoo_cache")
+        r = req.get(url=url, proxies=proxy)
+        html = r.text
+
+        if "QuoteSummaryStore" not in html:
+            return {}
+
+        try:
+            html_split = html.split("root.App.main =")[1].split('(this)')[0].split(';\n}')[0].strip()
+            json_data = json.loads(html_split)
+            data = json_data['context']['dispatcher']['stores']['QuoteSummaryStore']
+            return data
+
+        except JSONDecodeError:
+            return {}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     @staticmethod
     def timestamp_converter(timestamp):
