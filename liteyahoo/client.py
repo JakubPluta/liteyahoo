@@ -120,13 +120,65 @@ class Client:
         income_statement_quarterly_df = self._create_data_frame(income_statement_quarterly)
         self._income_statement = income_statement_df
 
+
+
+        # Holders
+
+        data = self._scrape_data_to_json(proxy, endpoint='/holders')
+
+        major_holders = data.get('majorDirectHolders')
+        if 'holders' in major_holders:
+            major_holders = pd.DataFrame(major_holders['holders'])
+
+        insider_holders = data.get('insiderHolders')
+        if 'holders' in insider_holders:
+            try:
+                insider_holders = pd.DataFrame(insider_holders['holders']).drop('maxAge',axis=1)[['name','relation','transactionDescription','latestTransDate']]
+                insider_holders['latestTransDate'] = insider_holders['latestTransDate'].apply(lambda x: x.get('raw'))
+                insider_holders['latestTransDate'] = pd.to_datetime(insider_holders['latestTransDate'],unit='s')
+                insider_holders.set_index('latestTransDate',inplace=True)
+            except KeyError:
+                insider_holders = pd.DataFrame(insider_holders['holders']).drop('maxAge',axis=1)
+
+
+        summary_detail = pd.DataFrame(data.get('summaryDetail')).T['raw']
+
+        quote_type = pd.DataFrame(data.get('quoteType').items())
+
+        fund_owner = pd.DataFrame(data.get('fundOwnership')['ownershipList'])
+
+        fund_owner.drop('maxAge', axis=1,inplace=True)
+        for col in fund_owner.columns:
+            print(fund_owner[col])
+            fund_owner[col] = fund_owner[col].apply(lambda x: x.get('raw') if isinstance(x,dict) else x)
+        fund_owner['reportDate'] = pd.to_datetime(fund_owner['reportDate'], unit='s')
+        fund_owner.set_index('reportDate', inplace=True)
+
+        insider_transactions = data.get('insiderTransactions')
+        if 'transactions' in insider_transactions:
+            try:
+                insider_transactions = pd.DataFrame(data.get('insiderTransactions')['transactions'])
+                insider_transactions = insider_transactions[['filerName', 'transactionText', 'ownership',
+                                                             'startDate', 'value', 'filerRelation', 'shares']]
+                for col in ['startDate','value','shares']:
+                    insider_transactions[col] = insider_transactions[col].apply(lambda x: x.get('raw') if isinstance(x,dict) else x)
+
+                insider_transactions['startDate'] = pd.to_datetime(insider_transactions['reportDate'], unit='s')
+                insider_transactions.set_index('startDate', inplace=True)
+
+            except KeyError:
+                insider_transactions = pd.DataFrame(data.get('insiderTransactions'))
+
+
     @staticmethod
     def _create_data_frame(data):
         df = pd.DataFrame(data).drop('maxAge',axis=1)
         for col in df.columns:
             df[col] = df[col].apply(lambda x: x.get('raw') if x not in [np.NaN, np.NAN, None, 'nan'] else None)
-        df['endDate'] = pd.to_datetime(df['endDate'],unit='s')
-        return df.set_index('endDate').T
+        if 'endDate' in df.columns:
+            df['endDate'] = pd.to_datetime(df['endDate'],unit='s')
+            df = df.set_index('endDate')
+        return df.T
 
     def _scrape_data_to_json(self, proxy, endpoint=""):
         if proxy: proxy = proxy_setter(proxy)
@@ -147,23 +199,6 @@ class Client:
 
         except JSONDecodeError:
             return {}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     @staticmethod
     def timestamp_converter(timestamp):
