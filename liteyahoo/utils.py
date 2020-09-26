@@ -1,4 +1,5 @@
 import datetime, time
+import numpy as np
 
 
 def convert_to_timestamp(x):
@@ -15,7 +16,6 @@ def proxy_setter(proxy):
         proxy = proxy["https"]
         return {"https": proxy}
 
-import numpy as np
 
 def parse_item(x):
     if x in [np.NaN, np.NAN, None, 'nan']:

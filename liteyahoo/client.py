@@ -19,18 +19,20 @@ class Client:
 
     def __init__(self, symbol: str):
         self._symbol = symbol
-        self._company_info: json = None
-        self._historical_prices: json = None
+        self._company_info: dict = {}
+        self._historical_prices: pd.DataFrame
         self._recommendations: json = None
-        self._fundamentals: json = None
+        self._fundamentals = False
         self._cash_flow: json = None
         self._income_statement: json = None
         self._balance_sheet: json = None
         self._splits: pd.DataFrame() = None
         self._dividends: pd.DataFrame() = None
-        self._financials: json = None
-
-        self._sentiment: json = None
+        self._trends = {}
+        self._financials = None
+        self._holders = {}
+        self._events = None
+        self._sentiment = None
 
     def historical_prices(self, period="1y", interval="1d", start=None,
                           end=None, proxy=None, **kwargs):
@@ -84,19 +86,16 @@ class Client:
                 dividends_df = pd.DataFrame(list(pre_quotes['events']['dividends'].values()))
                 dividends_df['date'] = pd.to_datetime(dividends_df['date'], unit='s')
                 dividends_df.set_index('date', inplace=True)
+                self._dividends = dividends_df
 
             if 'splits' in pre_quotes["events"]:
                 splits_df = pd.DataFrame(list(pre_quotes['events']['splits'].values()))[['date','splitRatio']]
                 splits_df['date'] = pd.to_datetime(splits_df['date'], unit='s')
                 splits_df.set_index('date',inplace=True)
-                quotes_df = pd.concat([quotes_df,splits_df], axis=1, sort=True)
+                self._splits = splits_df
 
-        return quotes_df
+    def fundamentals(self, proxy=None, **kwargs):
 
-    def fundamentals(self, element=None, proxy=None, **kwargs):
-        """
-        * Finance
-        """
         data = self._scrape_data_to_json(proxy, endpoint='/financials')
 
         # CashFlow
@@ -127,17 +126,23 @@ class Client:
         if 'holders' in major_holders:
             major_holders = self._create_data_frame(data=major_holders['holders'], date_col='latestTransDate').T
 
+        self._holders['major_holders'] = major_holders
+
         insider_holders = data.get('insiderHolders')
         if 'holders' in insider_holders:
             insider_holders = self._create_data_frame(data=insider_holders['holders'],date_col='latestTransDate').T
 
-        if 'summaryDetail' in data:
-            summary_detail = self._create_data_frame(data.get('summaryDetail'))['raw']
+        self._holders['insider_holders'] = insider_holders
 
-        quote_type = self._create_data_frame(data.get('quoteType').items()).T
+        if 'summaryDetail' in data:
+            self._company_info['summary'] = self._create_data_frame(data.get('summaryDetail'))['raw']
+
+        if 'quote_type' in data:
+            self._company_info['quote_type'] = self._create_data_frame(data.get('quoteType').items()).T
 
         if 'fundOwnership' in data:
-            fund_owner = self._create_data_frame(data.get('fundOwnership')['ownershipList'],date_col='reportDate').T
+            self._company_info['fund_owner'] = self._create_data_frame(data.get('fundOwnership')['ownershipList'],
+                                                                       date_col='reportDate').T
 
         insider_transactions = data.get('insiderTransactions')
         if 'transactions' in insider_transactions:
@@ -148,38 +153,35 @@ class Client:
                 for col in ['startDate','value','shares']:
                     insider_transactions[col] = insider_transactions[col].apply(
                         lambda x: parse_item(x))
-
                 insider_transactions['startDate'] = pd.to_datetime(insider_transactions['startDate'], unit='s')
                 insider_transactions.set_index('startDate', inplace=True)
-
+                self._company_info['insider_transactions'] = insider_transactions
             except KeyError:
-                insider_transactions = pd.DataFrame(data.get('insiderTransactions'))
+                self._company_info['insider_transactions'] = pd.DataFrame(data.get('insiderTransactions'))
 
         if 'price' in data:
             try:
-                prices = pd.DataFrame(data['price']).T['raw']
+                prices = pd.DataFrame(data['price']).T
             except KeyError:
                 prices = pd.DataFrame(data['price'])
+            self._company_info['prices'] = prices.get('raw')
 
         # KEY STATS
         data = self._scrape_data_to_json(proxy, endpoint='/key-statistics')
 
         if 'defaultKeyStatistics' in data:
-            key_statistics = self._create_data_frame(data.get('defaultKeyStatistics'))['raw']
-
+            self._key_stats = self._create_data_frame(data.get('defaultKeyStatistics')).get('raw')
         if 'calendarEvents' in data:
-            events = self._create_data_frame(data.get('calendarEvents')).T
-
+            self._events = self._create_data_frame(data.get('calendarEvents')).T
         if 'financialData' in data:
-            financial_data =  self._create_data_frame(data.get('financialData'))['raw']
+            self._financials =  self._create_data_frame(data.get('financialData')).get('raw')
 
         # Analysis
         data = self._scrape_data_to_json(proxy, endpoint='/analysis')
-
-        trend_recommendation = pd.DataFrame(data.get('recommendationTrend')['trend'])
-        index_trend = self._create_data_frame(data.get('indexTrend')['estimates']).T.dropna()
-        earnings_trend = self._create_data_frame(data.get('earningsTrend')['trend']).T.dropna()
-        recommendations = self._create_data_frame(data=data.get('upgradeDowngradeHistory')['history'],date_col='epochGradeDate').T
+        self._trends['trend_recommendation'] = pd.DataFrame(data.get('recommendationTrend')['trend'])
+        self._trends['index_recommendation'] = self._create_data_frame(data.get('indexTrend')['estimates']).T.dropna()
+        self._trends['earnings_recommendation'] = self._create_data_frame(data.get('earningsTrend')['trend']).T.dropna()
+        self._recommendations = self._create_data_frame(data=data.get('upgradeDowngradeHistory')['history'],date_col='epochGradeDate').T
 
         # sustainability
         data = self._scrape_data_to_json(proxy, endpoint='/sustainability')
@@ -187,11 +189,11 @@ class Client:
         if 'esgScores' in data:
             sus = data.get('esgScores')
             for item in sus:
-                print(item)
                 if isinstance(sus[item], dict):
                     sustainability[item] = sus[item]
+        self._company_info['sustainability'] = pd.DataFrame(sustainability).T
 
-        sustainability = pd.DataFrame(sustainability).T
+        self._fundamentals = True
 
     @staticmethod
     def _create_data_frame(data, date_col=None):
@@ -230,7 +232,6 @@ class Client:
     @staticmethod
     def timestamp_converter(timestamp):
         return [dt.datetime.fromtimestamp(_) for _ in timestamp]
-
 
 
 
