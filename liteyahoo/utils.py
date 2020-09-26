@@ -14,3 +14,13 @@ def proxy_setter(proxy):
     if isinstance(proxy, dict) and "https" in proxy:
         proxy = proxy["https"]
         return {"https": proxy}
+
+import numpy as np
+
+def parse_item(x):
+    if x in [np.NaN, np.NAN, None, 'nan']:
+        return None
+    elif isinstance(x, dict):
+        return x.get('raw')
+    else:
+        return x

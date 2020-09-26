@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import json
 import re
-from .utils import convert_to_timestamp, proxy_setter
+from .utils import convert_to_timestamp, proxy_setter, parse_item
 from json import JSONDecodeError
 import requests_cache
 
@@ -102,57 +102,42 @@ class Client:
         # CashFlow
         cash_flow = data.get('cashflowStatementHistory')['cashflowStatements']
         cash_flow_quarterly = data.get('cashflowStatementHistoryQuarterly')['cashflowStatements']
-        cash_flow_df = self._create_data_frame(cash_flow)
-        cash_flow_quarterly_df = self._create_data_frame(cash_flow_quarterly)
+        cash_flow_df = self._create_data_frame(cash_flow, date_col='endDate')
+        cash_flow_quarterly_df = self._create_data_frame(cash_flow_quarterly, date_col='endDate')
         self._cash_flow = cash_flow_df
 
         # Balance Sheet
         balance_sheet = data.get('balanceSheetHistory')['balanceSheetStatements']
         balance_sheet_quarterly = data.get('balanceSheetHistoryQuarterly')['balanceSheetStatements']
-        balance_sheet_df = self._create_data_frame(balance_sheet)
-        balance_sheet_quarterly_df = self._create_data_frame(balance_sheet_quarterly)
+        balance_sheet_df = self._create_data_frame(balance_sheet, date_col='endDate')
+        balance_sheet_quarterly_df = self._create_data_frame(balance_sheet_quarterly, date_col='endDate')
         self._balance_sheet = balance_sheet_df
 
         # Income Statement
         income_statement = data.get('incomeStatementHistory')['incomeStatementHistory']
         income_statement_quarterly = data.get('incomeStatementHistoryQuarterly')['incomeStatementHistory']
-        income_statement_df = self._create_data_frame(income_statement)
-        income_statement_quarterly_df = self._create_data_frame(income_statement_quarterly)
+        income_statement_df = self._create_data_frame(income_statement, date_col='endDate')
+        income_statement_quarterly_df = self._create_data_frame(income_statement_quarterly,date_col='endDate')
         self._income_statement = income_statement_df
 
-
-
         # Holders
-
         data = self._scrape_data_to_json(proxy, endpoint='/holders')
 
         major_holders = data.get('majorDirectHolders')
         if 'holders' in major_holders:
-            major_holders = pd.DataFrame(major_holders['holders'])
+            major_holders = self._create_data_frame(data=major_holders['holders'], date_col='latestTransDate').T
 
         insider_holders = data.get('insiderHolders')
         if 'holders' in insider_holders:
-            try:
-                insider_holders = pd.DataFrame(insider_holders['holders']).drop('maxAge',axis=1)[['name','relation','transactionDescription','latestTransDate']]
-                insider_holders['latestTransDate'] = insider_holders['latestTransDate'].apply(lambda x: x.get('raw'))
-                insider_holders['latestTransDate'] = pd.to_datetime(insider_holders['latestTransDate'],unit='s')
-                insider_holders.set_index('latestTransDate',inplace=True)
-            except KeyError:
-                insider_holders = pd.DataFrame(insider_holders['holders']).drop('maxAge',axis=1)
+            insider_holders = self._create_data_frame(data=insider_holders['holders'],date_col='latestTransDate').T
 
+        if 'summaryDetail' in data:
+            summary_detail = self._create_data_frame(data.get('summaryDetail'))['raw']
 
-        summary_detail = pd.DataFrame(data.get('summaryDetail')).T['raw']
+        quote_type = self._create_data_frame(data.get('quoteType').items()).T
 
-        quote_type = pd.DataFrame(data.get('quoteType').items())
-
-        fund_owner = pd.DataFrame(data.get('fundOwnership')['ownershipList'])
-
-        fund_owner.drop('maxAge', axis=1,inplace=True)
-        for col in fund_owner.columns:
-            print(fund_owner[col])
-            fund_owner[col] = fund_owner[col].apply(lambda x: x.get('raw') if isinstance(x,dict) else x)
-        fund_owner['reportDate'] = pd.to_datetime(fund_owner['reportDate'], unit='s')
-        fund_owner.set_index('reportDate', inplace=True)
+        if 'fundOwnership' in data:
+            fund_owner = self._create_data_frame(data.get('fundOwnership')['ownershipList'],date_col='reportDate').T
 
         insider_transactions = data.get('insiderTransactions')
         if 'transactions' in insider_transactions:
@@ -161,23 +146,65 @@ class Client:
                 insider_transactions = insider_transactions[['filerName', 'transactionText', 'ownership',
                                                              'startDate', 'value', 'filerRelation', 'shares']]
                 for col in ['startDate','value','shares']:
-                    insider_transactions[col] = insider_transactions[col].apply(lambda x: x.get('raw') if isinstance(x,dict) else x)
+                    insider_transactions[col] = insider_transactions[col].apply(
+                        lambda x: parse_item(x))
 
-                insider_transactions['startDate'] = pd.to_datetime(insider_transactions['reportDate'], unit='s')
+                insider_transactions['startDate'] = pd.to_datetime(insider_transactions['startDate'], unit='s')
                 insider_transactions.set_index('startDate', inplace=True)
 
             except KeyError:
                 insider_transactions = pd.DataFrame(data.get('insiderTransactions'))
 
+        if 'price' in data:
+            try:
+                prices = pd.DataFrame(data['price']).T['raw']
+            except KeyError:
+                prices = pd.DataFrame(data['price'])
+
+        # KEY STATS
+        data = self._scrape_data_to_json(proxy, endpoint='/key-statistics')
+
+        if 'defaultKeyStatistics' in data:
+            key_statistics = self._create_data_frame(data.get('defaultKeyStatistics'))['raw']
+
+        if 'calendarEvents' in data:
+            events = self._create_data_frame(data.get('calendarEvents')).T
+
+        if 'financialData' in data:
+            financial_data =  self._create_data_frame(data.get('financialData'))['raw']
+
+        # Analysis
+        data = self._scrape_data_to_json(proxy, endpoint='/analysis')
+
+        trend_recommendation = pd.DataFrame(data.get('recommendationTrend')['trend'])
+        index_trend = self._create_data_frame(data.get('indexTrend')['estimates']).T.dropna()
+        earnings_trend = self._create_data_frame(data.get('earningsTrend')['trend']).T.dropna()
+        recommendations = self._create_data_frame(data=data.get('upgradeDowngradeHistory')['history'],date_col='epochGradeDate').T
+
+        # sustainability
+        data = self._scrape_data_to_json(proxy, endpoint='/sustainability')
+        sustainability = {}
+        if 'esgScores' in data:
+            sus = data.get('esgScores')
+            for item in sus:
+                print(item)
+                if isinstance(sus[item], dict):
+                    sustainability[item] = sus[item]
+
+        sustainability = pd.DataFrame(sustainability).T
 
     @staticmethod
-    def _create_data_frame(data):
-        df = pd.DataFrame(data).drop('maxAge',axis=1)
+    def _create_data_frame(data, date_col=None):
+        df = pd.DataFrame(data)
+        if 'maxAge' in df.columns:
+            df.drop('maxAge', axis=1, inplace=True)
         for col in df.columns:
-            df[col] = df[col].apply(lambda x: x.get('raw') if x not in [np.NaN, np.NAN, None, 'nan'] else None)
-        if 'endDate' in df.columns:
-            df['endDate'] = pd.to_datetime(df['endDate'],unit='s')
-            df = df.set_index('endDate')
+            df[col] = df[col].apply(lambda x: parse_item(x))
+
+        if date_col and date_col in df.columns:
+            df[date_col] = pd.to_datetime(df[date_col],unit='s')
+            df = df.set_index(date_col)
+
         return df.T
 
     def _scrape_data_to_json(self, proxy, endpoint=""):
