@@ -17,7 +17,7 @@ class NewsClient:
     def _get_json(self, query=None, keywords_title=None, **kwargs):
         requests_cache.install_cache("news_cache")
         payload = {
-            'sources': 'bbc-news,the-verge',
+            'sources': 'bbc-news_scrapers,the-verge',
             'domains': 'bbc.co.uk,techcrunch.com',
             'language': 'en'
         }

@@ -12,10 +12,10 @@ class SeekingAlphaNews:
     def scrape(self):
         page = requests.get(self.MARKET_NEWS_URL, headers=self.HEADERS)
         soup = BeautifulSoup(page.text, features="lxml")
-        news = soup.find(name="ul", attrs={'class':"item-list",'id':'latest-news-list'})
+        news = soup.find(name="ul", attrs={'class':"item-list",'id':'latest-news_scrapers-list'})
 
         id_list = [i.get('id') for i in news.find_all(name='li', attrs={'class':'item'})]
-        id_list = [i.replace('latest-news-','')  for i in id_list if i]
+        id_list = [i.replace('latest-news_scrapers-','')  for i in id_list if i]
         headings = [i.text for i in news.find_all('a')]
         urls = [self.BASE_URL+i['href'] for i in news.find_all('a')]
         date_list = [i.get('data-last-date') for i in news.find_all(name='li', attrs={'class':'item'})]
