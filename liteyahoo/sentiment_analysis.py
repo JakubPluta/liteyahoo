@@ -38,6 +38,4 @@ class Sentiment:
             "Sentiment" : sent_desc
         }
 
-a = Sentiment('FB')
-print(a.sentiment_info)
 

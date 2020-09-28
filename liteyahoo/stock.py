@@ -1,9 +1,11 @@
 from .client import Client
+from .sentiment_analysis import Sentiment
 
 
 class Stock(Client):
     def __init__(self,symbol):
         super().__init__(symbol)
+        self._sentiment = Sentiment(symbol)
 
         if not self._fundamentals:
             self.fundamentals()
@@ -67,3 +69,8 @@ class Stock(Client):
     @property
     def sustainability(self):
         return self._company_info.get('sustainability')
+
+    @property
+    def sentiment(self):
+        return self._sentiment.sentiment_info
+
