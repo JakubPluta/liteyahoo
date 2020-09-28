@@ -1,5 +1,5 @@
 from liteyahoo.news_scrapers.finviz import FinVizScraper
-import nltk
+from liteyahoo.news_scrapers.fidelity import Fidelity
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import pandas as pd
 
@@ -7,16 +7,21 @@ import pandas as pd
 class Sentiment:
     def __init__(self, symbol):
         self._symbol = symbol
-        self._news_clients = FinVizScraper()
+        self._news_clients = [FinVizScraper(), Fidelity()]
         self._vader = SentimentIntensityAnalyzer()
         self._stats = {}
+        self._news = None
+
         if isinstance(symbol,str):
-         self._news = self._news_clients.scrape(symbol)
+            data = []
+            for client in self._news_clients:
+                data.append(client.scrape(symbol))
+            self._news = pd.concat(data)
 
     def _analyze(self):
         scores = self._news['Header'].apply(self._vader.polarity_scores).tolist()
         scores_df = pd.DataFrame(scores)
-        scores_df = self._news[['Symbol','Time','Header']].join(scores_df)
+        scores_df = self._news[['Symbol','Header']].join(scores_df)
         return scores_df.groupby(['Symbol']).mean()
 
     @property
@@ -32,4 +37,7 @@ class Sentiment:
             "Score" : sentiment.get('compound')[0],
             "Sentiment" : sent_desc
         }
+
+a = Sentiment('FB')
+print(a.sentiment_info)
 

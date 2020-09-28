@@ -1,8 +1,6 @@
 import pandas as pd
 from bs4 import BeautifulSoup
 import requests
-import requests_cache
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 
 class FinVizScraper:
@@ -21,9 +19,7 @@ class FinVizScraper:
 
         self._data[symbol] = {
             'Symbol' : symbol,
-            'Time' : [item.td.text.strip() for item in table],
             'Header' : [item.a.text for item in table],
-            'Url' : [item.a.get('href') for item in table]
         }
 
         if as_dict:
